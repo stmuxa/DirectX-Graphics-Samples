@@ -12,6 +12,9 @@
 #include "stdafx.h"
 #include "D3D12HelloTriangle.h"
 
+#include <sstream>
+#include <RadeonImageFilters_directx12.h>
+
 D3D12HelloTriangle::D3D12HelloTriangle(UINT width, UINT height, std::wstring name) :
     DXSample(width, height, name),
     m_frameIndex(0),
@@ -25,6 +28,38 @@ void D3D12HelloTriangle::OnInit()
 {
     LoadPipeline();
     LoadAssets();
+    LoadRIF();
+}
+
+#define RIF_CALL(call) \
+do { \
+    rif_int status = call; \
+    if (status != RIF_SUCCESS) \
+    { \
+        std::wstringstream ss; \
+        ss << __FILE__ << "(" << __LINE__ << "): RIF call " << call << " returned error (" << status << ") " << rifGetLastErrorMessage() << std::endl; \
+        OutputDebugString(ss.str().c_str()); \
+    } \
+} while (0)
+
+void D3D12HelloTriangle::LoadRIF()
+{
+    RIF_CALL(rifCreateContextFromDirectX12Context(RIF_API_VERSION, m_device.Get(), m_commandQueue.Get(), nullptr, &m_rifContext));
+    RIF_CALL(rifContextCreateCommandQueue(m_rifContext, &m_rifCommandQueue));
+    RIF_CALL(rifContextCreateImageFilter(m_rifContext, RIF_IMAGE_FILTER_RESAMPLE, &m_rifImageFilter));
+
+    //RIF_CALL(rifImageFilterSetComputeType(m_rifImageFilter, RIF_COMPUTE_TYPE_HALF));
+    RIF_CALL(rifImageFilterSetParameter1u(m_rifImageFilter, "interpOperator", RIF_IMAGE_INTERPOLATION_NEAREST));
+
+    rif_image_desc desc = {};
+    desc.image_width = 1920;
+    desc.image_height= 1080;
+    desc.num_components = 4;
+    desc.type = RIF_COMPONENT_TYPE_UINT8;
+    RIF_CALL(rifContextCreateImage(m_rifContext, &desc, nullptr, &m_rifInputImage));
+    RIF_CALL(rifContextCreateImage(m_rifContext, &desc, nullptr, &m_rifOutputImage));
+
+    RIF_CALL(rifCommandQueueAttachImageFilter(m_rifCommandQueue, m_rifImageFilter, m_rifInputImage, m_rifOutputImage));
 }
 
 // Load the rendering pipeline dependencies.
@@ -266,6 +301,12 @@ void D3D12HelloTriangle::OnRender()
     ID3D12CommandList* ppCommandLists[] = { m_commandList.Get() };
     m_commandQueue->ExecuteCommandLists(_countof(ppCommandLists), ppCommandLists);
 
+    rif_performance_statistic stats = {};
+    stats.measure_execution_time = true;
+    RIF_CALL(rifContextExecuteCommandQueue(m_rifContext, m_rifCommandQueue, nullptr, nullptr, &stats));
+    OutputDebugString((std::wstring(L"Motion blur completed in :") + std::to_wstring(stats.execution_time/1000) + L" us\n").c_str());
+    RIF_CALL(rifSyncronizeQueue(m_rifCommandQueue));
+
     // Present the frame.
     ThrowIfFailed(m_swapChain->Present(1, 0));
 
@@ -274,6 +315,13 @@ void D3D12HelloTriangle::OnRender()
 
 void D3D12HelloTriangle::OnDestroy()
 {
+    RIF_CALL(rifCommandQueueDetachImageFilter(m_rifCommandQueue, m_rifImageFilter));
+    RIF_CALL(rifObjectDelete(m_rifInputImage));
+    RIF_CALL(rifObjectDelete(m_rifOutputImage));
+    RIF_CALL(rifObjectDelete(m_rifImageFilter));
+    RIF_CALL(rifObjectDelete(m_rifCommandQueue));
+    RIF_CALL(rifObjectDelete(m_rifContext));
+
     // Ensure that the GPU is no longer referencing resources that are about to be
     // cleaned up by the destructor.
     WaitForPreviousFrame();

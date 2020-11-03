@@ -12,6 +12,7 @@
 #pragma once
 
 #include "DXSample.h"
+#include <RadeonImageFilters.h>
 
 using namespace DirectX;
 
@@ -65,8 +66,16 @@ private:
     ComPtr<ID3D12Fence> m_fence;
     UINT64 m_fenceValue;
 
+    // RIF objects
+    rif_context m_rifContext;
+    rif_command_queue m_rifCommandQueue;
+    rif_image_filter m_rifImageFilter;
+    rif_image m_rifInputImage;
+    rif_image m_rifOutputImage;
+
     void LoadPipeline();
     void LoadAssets();
+    void LoadRIF();
     void PopulateCommandList();
     void WaitForPreviousFrame();
 };
